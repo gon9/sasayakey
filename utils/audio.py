@@ -1,4 +1,6 @@
+import contextlib
 import io
+import os
 import wave
 
 import pyaudio
@@ -12,9 +14,40 @@ CHUNK_SAMPLES = int(SAMPLE_RATE * CHUNK_MS / 1000)  # 480 samples = 30ms
 BYTES_PER_SAMPLE = 2  # int16
 
 
+@contextlib.contextmanager
+def _suppress_alsa_errors():
+    """Redirect C-level stderr to /dev/null to silence ALSA/JACK noise."""
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
+
+
+def _open_pyaudio() -> pyaudio.PyAudio:
+    with _suppress_alsa_errors():
+        pa = pyaudio.PyAudio()
+    input_devices = [
+        pa.get_device_info_by_index(i)
+        for i in range(pa.get_device_count())
+        if pa.get_device_info_by_index(i)["maxInputChannels"] > 0
+    ]
+    if not input_devices:
+        pa.terminate()
+        raise RuntimeError(
+            "No audio input device found.\n"
+            "Check that your microphone is connected and recognized by the OS."
+        )
+    return pa
+
+
 def stream_chunks():
     """Yield 30ms raw PCM chunks from the default microphone indefinitely."""
-    audio = pyaudio.PyAudio()
+    audio = _open_pyaudio()
     stream = audio.open(
         format=FORMAT,
         channels=CHANNELS,
@@ -38,7 +71,7 @@ def record_until_silence(silence_ms: int = 1500, vad_aggressiveness: int = 2) ->
     Returns empty bytes if no speech is detected within ~10 seconds.
     """
     vad = webrtcvad.Vad(vad_aggressiveness)
-    audio = pyaudio.PyAudio()
+    audio = _open_pyaudio()
     stream = audio.open(
         format=FORMAT,
         channels=CHANNELS,
