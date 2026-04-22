@@ -1,0 +1,32 @@
+services:
+  # Pattern 2: real-time transcription + Claude (default)
+  realtime:
+    build: .
+    env_file: .env          # ANTHROPIC_API_KEY=sk-...
+    environment:
+      VOSK_MODEL_PATH: /models/vosk-model-small-ja-0.22
+    volumes:
+      # Vosk model — download once, mount read-only
+      - ./vosk-model-small-ja-0.22:/models/vosk-model-small-ja-0.22:ro
+      # PulseAudio socket (Linux desktop)
+      - /run/user/1000/pulse:/run/user/1000/pulse
+    devices:
+      - /dev/snd:/dev/snd   # ALSA hardware access
+    group_add:
+      - audio
+    stdin_open: true
+    tty: true
+
+  # Pattern 1: press Enter → record → faster-whisper → Claude
+  batch:
+    build: .
+    command: uv run python batch_mode.py
+    env_file: .env
+    volumes:
+      - /run/user/1000/pulse:/run/user/1000/pulse
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    stdin_open: true
+    tty: true
